@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Hand Pinch Gesture Test</title>
+
+<style>
+body {
+  margin: 0;
+  background: #220000; /* red = idle */
+  color: white;
+  font-family: monospace;
+  overflow: hidden;
+}
+
+#startOverlay {
+  position: fixed;
+  inset: 0;
+  background: black;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  z-index: 10;
+}
+
+#camBox {
+  position: fixed;
+  inset: 0;
+}
+
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror for user */
+}
+
+canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#shapeBox {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  width: 80px;
+  height: 80px;
+  background: white;
+  border-radius: 10px;
+}
+</style>
+</head>
+<body>
+
+<div id="startOverlay">Tap to Start ✋</div>
+
+<div id="camBox">
+  <video id="camView" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<!-- simple visual “shape” indicator -->
+<div id="shapeBox"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const video = document.getElementById("camView");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d");
+const shapeBox = document.getElementById("shapeBox");
+
+// force stable resolution
+video.width = 640;
+video.height = 480;
+
+// simple shapes (color-coded)
+const shapes = [
+  "white",
+  "deepskyblue",
+  "lime",
+  "magenta"
+];
+let shapeIndex = 0;
+let triggered = false;
+
+// MediaPipe Hands
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 0,
+  minDetectionConfidence: 0.4,
+  minTrackingConfidence: 0.4
+});
+
+hands.onResults(res => {
+  const w = video.videoWidth || 640;
+  const h = video.videoHeight || 480;
+  overlay.width = w;
+  overlay.height = h;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = "18px monospace";
+
+  if (!res.multiHandLandmarks || res.multiHandLandmarks.length === 0) {
+    document.body.style.background = "#220000";
+    ctx.fillStyle = "red";
+    ctx.fillText("NO HAND DETECTED", 20, 40);
+    return;
+  }
+
+  const lm = res.multiHandLandmarks[0];
+
+  // draw hand points
+  ctx.fillStyle = "lime";
+  lm.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x * w, p.y * h, 6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // PINCH DETECTION (distance-based, robust)
+  const thumb = lm[4];
+  const index = lm[8];
+
+  const pinchDist = Math.hypot(
+    thumb.x - index.x,
+    thumb.y - index.y
+  );
+
+  ctx.fillStyle = "white";
+  ctx.fillText(`Pinch dist: ${pinchDist.toFixed(3)}`, 20, 70);
+
+  // VISUAL STATE
+  if (pinchDist < 0.05) {
+    document.body.style.background = "#002200"; // green = pinch
+  } else {
+    document.body.style.background = "#220000"; // red = idle
+  }
+
+  // SHAPE CHANGE WITH DEBOUNCE
+  if (pinchDist < 0.05 && !triggered) {
+    triggered = true;
+    shapeIndex = (shapeIndex + 1) % shapes.length;
+    shapeBox.style.background = shapes[shapeIndex];
+  }
+
+  if (pinchDist > 0.07) {
+    triggered = false;
+  }
+});
+
+let cam;
+
+// start camera only after tap (mobile requirement)
+document.getElementById("startOverlay").onclick = () => {
+  document.getElementById("startOverlay").style.display = "none";
+
+  cam = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    width: 640,
+    height: 480,
+    facingMode: "user"
+  });
+
+  cam.start();
+};
+</script>
+
+</body>
+</html>
